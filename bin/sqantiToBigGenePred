@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+import os
+import argparse
+import pipettor
+from pycbio.sys import fileOps
+from pycbio.tsv import TsvReader, TabFileReader
+
+
+# colors from  SQANTI3-5.1.2/utilities/report_qc/SQANTI3_report.R
+
+categoryColors = {  # noqa: E241
+    "full-splice_match":        "107,174,214",   # #6BAED6
+    "incomplete-splice_match":  "252,141,89",    # #FC8D59
+    "novel_in_catalog":         "120,198,121",   # #78C679
+    "novel_not_in_catalog":     "238,106,80",    # #EE6A50
+    "genic":                    "150,150,150",   # #969696
+    "antisense":                "102,194,164",   # #66C2A4
+    "fusion":                   "218,165,32",    # goldenrod1
+    "intergenic":               "233,150,122",   # darksalmon
+    "genic_intron":             "65,182,196",    # #41B6C4
+}
+
+# ordered SQANTI QC column to add to genePred to match sqantiBigGenePred
+sqantiQcGpCols = ("length", "exons", "structural_category", "associated_gene",
+                  "associated_transcript", "ref_length", "ref_exons", "diff_to_TSS",
+                  "diff_to_TTS", "diff_to_gene_TSS", "diff_to_gene_TTS", "subcategory",
+                  "RTS_stage", "all_canonical", "min_sample_cov", "min_cov", "min_cov_pos",
+                  "sd_cov", "FL", "n_indels", "n_indels_junc", "bite", "iso_exp", "gene_exp",
+                  "ratio_exp", "FSM_class", "coding", "ORF_length", "CDS_length", "CDS_start",
+                  "CDS_end", "CDS_genomic_start", "CDS_genomic_end", "predicted_NMD",
+                  "perc_A_downstream_TTS", "seq_A_downstream_TTS", "dist_to_CAGE_peak",
+                  "within_CAGE_peak", "dist_to_polyA_site", "within_polyA_site", "polyA_motif",
+                  "polyA_dist", "polyA_motif_found", "ORF_seq", "ratio_TSS")
+
+def parseArgs():
+    desc = """Take SQANTI3 *_classification.txt and *_corrected.genePred files
+    and build a bigGenePred text files, ready for conversion to bigBed. With
+    colors coding matching that used in the SQANTI3 structural reports
+    """
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('sqantiClassTsv',
+                        help="SQANTI3 _classification.txt")
+    parser.add_argument('sqantiGenePred',
+                        help="SQANTI3 *_corrected.genePred")
+    parser.add_argument('bigGenePredOut',
+                        help="output text bigGenePred, with colors and other columns. Use sqantiBigGenePred.as to convert to bigBed. Output is sorted for conversion")
+    return parser.parse_args()
+
+def sqClassesLoad(sqantiClassTsv):
+    sqclasses = {}
+    for sqc in TsvReader(sqantiClassTsv):
+        sqclasses[sqc.isoform] = sqc
+    return sqclasses
+
+def writeColorsTmp(sqClasses):
+    "create tmp colors file used by genePredToBigGenePred"
+    colorsTmp = fileOps.tmpFileGet("sqcolors")
+    with open(colorsTmp, 'w') as fh:
+        for sqc in sqClasses.values():
+            fileOps.prRowv(fh, sqc.isoform, categoryColors[sqc.structural_category])
+    return colorsTmp
+
+def writeSqantiInfoTmp(sqClasses, columns):
+    "create a tmp for genePredToBigGenePred base on one or more SQANTI classsification column"
+    tmpTab = fileOps.tmpFileGet(columns[0])
+    with open(tmpTab, 'w') as fh:
+        for sqc in sqClasses.values():
+            vals = [sqc[c] for c in columns]
+            fileOps.prRowv(fh, sqc.isoform, *vals)
+    return tmpTab
+
+def updateGenePredRec(gpRec, sqClasses, bigSqGpOutFh):
+    "add SQANTI columns"
+    sqClass = sqClasses[gpRec[3]]
+    gpRec = gpRec + [sqClass[c] for c in sqantiQcGpCols]
+    fileOps.prRow(bigSqGpOutFh, gpRec)
+
+def updateGenePredRecs(bigGpInFh, sqClasses, bigSqGpOutFh):
+    for gpRec in TabFileReader(bigGpInFh):
+        updateGenePredRec(gpRec, sqClasses, bigSqGpOutFh)
+
+def sqantiToBigGenePred(sqantiClassTsv, sqantiGenePred, bigGenePredOut):
+    # make sure we sort in C locale
+    os.environ.pop("LC_ALL", None)
+    os.environ["LC_COLLATE"] = "C"
+
+    sqClasses = sqClassesLoad(sqantiClassTsv)
+    colorsTmp = writeColorsTmp(sqClasses)
+    geneNamesTmp = writeSqantiInfoTmp(sqClasses, ["associated_gene", "associated_transcript"])
+
+    # convert to bigGenePred and add columns
+
+    with pipettor.Popen([["genePredToBigGenePred", "-colors=" + colorsTmp, "-geneNames=" + geneNamesTmp,
+                          sqantiGenePred, "/dev/stdout"], ['sort', '-k1,1', '-k2,2n']], mode='r',) as bigGpInFh:
+        with open(bigGenePredOut, 'w') as bigSqGpOutFh:
+            updateGenePredRecs(bigGpInFh, sqClasses, bigSqGpOutFh)
+
+
+def main(opts):
+    sqantiToBigGenePred(opts.sqantiClassTsv, opts.sqantiGenePred, opts.bigGenePredOut)
+
+
+main(parseArgs())

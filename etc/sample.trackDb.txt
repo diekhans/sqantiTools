@@ -1,0 +1,18 @@
+track sqanti_sample
+html empty.html
+shortLabel Sqanti Sample
+longLabel Sqanti Sample
+description Sqanti Sample
+type bigGenePred
+itemRgb on
+priority 3
+visibility hide
+searchIndex name
+bigDataUrl squanti_sample.bb
+labelFields name,geneName
+defaultLabelFields geneName
+labelSeperator " / "
+exonNumbers off
+mouseOver transcript: $name	gene: $geneName	cat: $structural_category
+
+

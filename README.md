@@ -9,3 +9,8 @@ Dependencies:
 * pip install pipettor
 * pip install git+https://github.com/diekhans/pycbio.git
 * UCSC Browser command line tools
+
+
+To create a custom 
+
+    
